@@ -1,4 +1,8 @@
-# GWTdata: Download website data from Google Webmaster Tools as CSV.
+# Refactoring eyecatchup's php-webmaster-tools-downloads
+
+The purpose of this fork is to remove the dependency on curl from eyecatchup/php-webmaster-tools-downloads so I can use something like SplFileObject and ddeboer/data-import to process the csv data in a stream instead of just saving files to disk. The main contribution of this class is it's ability to construct the Google Webmaster Tools URL's and HTTP headers, so I'll add methods for returning those.
+
+## GWTdata: Download website data from Google Webmaster Tools as CSV.
 
 ## Introduction
 
