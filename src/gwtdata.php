@@ -24,6 +24,8 @@
 	 *  @link:   https://github.com/eyecatchup/php-webmaster-tools-downloads/
 	 */
 
+use HttpClientInterface;
+
 	 class GWTdata
 	 {
 		const HOST = "https://www.google.com";
@@ -31,6 +33,7 @@
 
 		public $_language, $_tables, $_daterange, $_downloaded, $_skipped;
 		private $_auth, $_logged_in;
+		private $_http_client;
 
 		public function __construct()
 		{
@@ -137,6 +140,37 @@
 			}
 
 		/**
+		 * Inject an HTTP client which the GWTdata object can use to send HTTP requests
+		 * 
+		 * The intent is to remove the curl dependency. It should be possible to wrap
+		 * other http clients such as SplFileObject in a class that implements
+		 * HttpClientInterface.
+		 * 
+		 * @param HttpClientInterface $http_client
+		 */
+			public function setHttpClient(HttpClientInterface $http_client)
+			{
+			    $this->_http_client = $http_client;
+			}
+
+		/**
+		 * Calls the closure that was set by setHttpClient()
+		 * 
+		 * This method has the same param and return type as
+		 * the callback that is provided to setHttpClient()
+		 * 
+		 * @param array $request looks like: ['url'=>'https://www.google.com...', 'method'=>'GET', 'body'=>string|castable __toString, 'headers'=>['Header-name'=>string|array]]
+		 * @return array GWTdata class uses the following keys: ['body'=>string|castable __toString, 'status_code'=>'',...]
+		 */
+			public function sendHttpRequest(array $request)
+			{
+			    $this->_http_client->setRequest($request);
+			    $response['status_code'] = $this->_http_client->getStatusCode();
+			    $response['body'] = $this->_http_client->getBody();
+			    return $response;
+			}
+
+		/**
 		 *  Attempts to log into the specified Google account.
 		 *
 		 *  @param $email  String   User's Google email address.
@@ -146,7 +180,25 @@
 		 */
 			public function LogIn($email, $pwd)
 			{
-				$url = self::HOST . "/accounts/ClientLogin";
+			    $request = $this->getLogInRequest($email, $pwd);
+			    $response = $this->sendHttpRequest($request);
+			    if (isset($response['status_code']) && $response['status_code'] == 200 && (string)$response['body'])
+			    {
+			        return $this->parseAuthToken($response['body']);
+			    }
+			    return false;
+			}
+			
+		/**
+		 *  Get the request param for sendHttpRequest() for logging into the specified Google account.
+		 *
+		 *  @param $email  String   User's Google email address.
+		 *  @param $pwd    String   Password for Google account.
+		 *  @return array  Returns array with keys needed by sendHttpRequest()
+		 */
+			public function getLogInRequest($email, $pwd)
+			{
+			    $url = self::HOST . "/accounts/ClientLogin";
 				$postRequest = array(
 					'accountType' => 'HOSTED_OR_GOOGLE',
 					'Email' => $email,
@@ -154,13 +206,26 @@
 					'service' => "sitemaps",
 					'source' => "Google-WMTdownloadscript-0.1-php"
 				);
-				
+				$body = http_build_query($postRequest);
+				$method = 'GET';
+				return compact('url', 'method', 'body');
+			}
+			
+		/**
+		*  Parse out the auth token from login response.
+		*
+		*  @param $responseBody  String   body of response from Google login request.
+		*  @return Boolean  Returns true when Authentication was successful,
+		*                   else false.
+		*/
+			public function parseAuthToken($responseBody) {
+		    /**********************
 				// Before PHP version 5.2.0 and when the first char of $pass is an @ symbol, 
 				// send data in CURLOPT_POSTFIELDS as urlencoded string.
 				if ('@' === (string)$pwd[0] || version_compare(PHP_VERSION, '5.2.0') < 0) {
 				    $postRequest = http_build_query($postRequest);
 				}				
-				
+
 				$ch = curl_init();
 				curl_setopt($ch, CURLOPT_URL, $url);
 				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -173,16 +238,16 @@
 				$info = curl_getinfo($ch);
 				curl_close($ch);
 				if($info['http_code'] == 200) {
-					preg_match('/Auth=(.*)/', $output, $match);
+			*********************/
+					preg_match('/Auth=(.*)/', $responseBody, $match);
 					if(isset($match[1])) {
 						$this->_auth = $match[1];
 						$this->_logged_in = true;
 						return true;
 					} else { return false; }
-				} else { return false; }
 			}
 
-		/**
+	 	/**
 		 *  Attempts authenticated GET Request.
 		 *
 		 *  @param $url    String   URL for the GET request.
@@ -192,10 +257,9 @@
 			public function GetData($url)
 			{
 				if(self::IsLoggedIn() === true) {
-					$url = self::HOST . $url;
-					$head = array("Authorization: GoogleLogin auth=".$this->_auth,
-						"GData-Version: 2");
-					$ch = curl_init();
+				    $request = $this->GetDataRequest($url);
+				    /**********************
+				    $ch = curl_init();
 					curl_setopt($ch, CURLOPT_URL, $url);
 					curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 					curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
@@ -206,11 +270,30 @@
 					$result = curl_exec($ch);
 					$info = curl_getinfo($ch);
 					curl_close($ch);
-					return ($info['http_code']!=200) ? false : $result;
+					*************************/
+				    $response = $this->sendHttpRequest($request);
+					return ($response['status_code']!=200) ? false : (string)$response['body'];
 				} else { return false; }
 			}
 
 		/**
+		 *  Converts the relative url to the request structure needed by sendHttpRequest()
+		 *
+		 *  @param $url    String   URL for the GET request.
+		 *  @return array  Returns array with keys needed by sendHttpRequest()
+		 */
+			public function GetDataRequest($url)
+			{
+					$url = self::HOST . $url;
+					$headers = array(
+					    'Authorization' => "GoogleLogin auth={$this->_auth}",
+					    'GData-Version' => '2'
+					);
+					$method = 'GET';
+					return compact ('url', 'method', 'headers');
+			}
+
+	 	/**
 		 *  Gets all available sites from Google Webmaster Tools account.
 		 *
 		 *  @return Mixed  Array with all site URLs registered in GWT account,
@@ -219,20 +302,45 @@
 			public function GetSites()
 			{
 				if(self::IsLoggedIn() === true) {
-					$feed = self::GetData(self::SERVICEURI."feeds/sites/");
-					if($feed !== false) {
-						$sites = array();
-						$doc = new DOMDocument();
-						$doc->loadXML($feed);
-						foreach ($doc->getElementsByTagName('entry') as $node) {
-							array_push($sites,
-							  $node->getElementsByTagName('title')->item(0)->nodeValue);
-						}
-						return $sites;
-					} else { return false; }
+					$request = $this->GetSitesRequest();
+					$response = $this->sendHttpRequest($request);
+					$feed = (string)$response['body'];
+					return $this->parseSites($feed);
 				} else { return false; }
 			}
 
+		/**
+		 *  Get the request param for sendHttpRequest() to get a list of
+		 *  all available sites from Google Webmaster Tools account.
+		 *
+		 *  @return array  Returns array with keys needed by sendHttpRequest()
+		 */
+			public function GetSitesRequest()
+			{
+					return $this->GetDataRequest(self::SERVICEURI."feeds/sites/");
+			}
+
+		/**
+		 *  Gets all available sites from Google Webmaster Tools account.
+		 *
+		 *  @param $feed String  xml document - the response from sending the sites request
+		 *  @return Mixed  Array with all site URLs registered in GWT account,
+		 *                 or false (Boolean) if request failed.
+		 */
+			public function parseSites($feed)
+			{
+			        if($feed !== false) {
+			            $sites = array();
+			            $doc = new DOMDocument();
+			            $doc->loadXML($feed);
+			            foreach ($doc->getElementsByTagName('entry') as $node) {
+			                array_push($sites,
+			                $node->getElementsByTagName('title')->item(0)->nodeValue);
+			            }
+			            return $sites;
+			        } else { return false; }
+			}
+			
 		/**
 		 *  Gets the download links for an available site
 		 *  from the Google Webmaster Tools account.
@@ -244,14 +352,30 @@
 			public function GetDownloadUrls($url)
 			{
 				if(self::IsLoggedIn() === true) {
-					$_url = sprintf(self::SERVICEURI."downloads-list?hl=%s&siteUrl=%s",
-					  $this->_language,
-					  urlencode($url));
-					$downloadList = self::GetData($_url);
+				    $request = $this->GetDownloadUrlsRequest($url);
+				    $response = $this->sendHttpRequest($request);
+					$downloadList = (string)$response['body'];
 					return json_decode($downloadList, true);
 				} else { return false; }
 			}
 
+		/**
+		 *  Get the request param for sendHttpRequest() to download links
+		 *  for an available site
+		 *  from the Google Webmaster Tools account.
+		 *
+		 *  @param $url    String   Site URL registered in GWT.
+		 *  @return array  Returns array with keys needed by sendHttpRequest()
+		 */
+			public function GetDownloadUrlsRequest($url)
+			{
+			        $_url = sprintf(self::SERVICEURI."downloads-list?hl=%s&siteUrl=%s",
+			            $this->_language,
+			            urlencode($url));
+			        return $this->GetDataRequest($_url);
+			}
+				
+				
 		/**
 		 *  Downloads the file based on the given URL.
 		 *
@@ -373,7 +497,9 @@
 		 */
 			private function SaveData($finalUrl, $finalName)
 			{
-				$data = self::GetData($finalUrl);
+			    $request = $this->GetDataRequest($finalUrl);
+			    $response = $this->sendHttpRequest($request);
+				$data = (string)$response['body'];
 				if(strlen($data) > 1 && file_put_contents($finalName, utf8_decode($data))) {
 					array_push($this->_downloaded, realpath($finalName));
 					return true;
