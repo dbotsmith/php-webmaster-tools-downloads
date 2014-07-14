@@ -24,8 +24,6 @@
 	 *  @link:   https://github.com/eyecatchup/php-webmaster-tools-downloads/
 	 */
 
-use HttpClientInterface;
-
 	 class GWTdata
 	 {
 		const HOST = "https://www.google.com";
@@ -140,15 +138,15 @@ use HttpClientInterface;
 			}
 
 		/**
-		 * Inject an HTTP client which the GWTdata object can use to send HTTP requests
+		 * Inject a callback which the GWTdata object can use to send HTTP requests
 		 * 
-		 * The intent is to remove the curl dependency. It should be possible to wrap
-		 * other http clients such as SplFileObject in a class that implements
-		 * HttpClientInterface.
+		 * The intent is to remove the curl dependency. E.g. the callback could
+		 * use Guzzle, or PHP stream wrappers. See callHttpClient() for the
+		 * prototype of the callback.
 		 * 
-		 * @param HttpClientInterface $http_client
+		 * @param callable $http_client
 		 */
-			public function setHttpClient(HttpClientInterface $http_client)
+			public function setHttpClient(callable $http_client)
 			{
 			    $this->_http_client = $http_client;
 			}
@@ -157,17 +155,30 @@ use HttpClientInterface;
 		 * Calls the closure that was set by setHttpClient()
 		 * 
 		 * This method has the same param and return type as
-		 * the callback that is provided to setHttpClient()
+		 * the callback that is provided to setHttpClient().
+		 * If http status code is not 200, or other error 
+		 * e.g. if desired, when Content-Type doesn't match Accept header,
+		 * the callback should throw an Exception which should
+		 * be caught by the caller of GWTdata. GWTdata attempts to
+		 * set the correct Accept headers including
+		 * text/csv,
+		 * application/x-javascript for downloads list, 
+		 * application/atom+xml for the sites list,
+		 * text/plain for the LogIn token.
+		 * for GetToken I haven't checked yet.
 		 * 
-		 * @param array $request looks like: ['url'=>'https://www.google.com...', 'method'=>'GET', 'body'=>string|castable __toString, 'headers'=>['Header-name'=>string|array]]
-		 * @return array GWTdata class uses the following keys: ['body'=>string|castable __toString, 'status_code'=>'',...]
+		 * @param array $request          Looks like: ['url'=>'https://www.google.com...',
+		 *                                             'method'=>'GET',
+		 *                                             'body'=>string,
+		 *                                             'headers'=>['Authorization' => 'GoogleLogin auth=...',
+		 *                                                         'GData-Version' => '2',
+		 *                                                         'Accept' => 'text/csv',
+		 *                                                         'Header-name'=>string|array]]
+		 * @return string|object|resource If object or resource, it should be castable to a string
 		 */
-			public function sendHttpRequest(array $request)
+			public function callHttpClient(array $request)
 			{
-			    $this->_http_client->setRequest($request);
-			    $response['status_code'] = $this->_http_client->getStatusCode();
-			    $response['body'] = $this->_http_client->getBody();
-			    return $response;
+			    return $this->_http_client($request);
 			}
 
 		/**
@@ -181,20 +192,16 @@ use HttpClientInterface;
 			public function LogIn($email, $pwd)
 			{
 			    $request = $this->getLogInRequest($email, $pwd);
-			    $response = $this->sendHttpRequest($request);
-			    if (isset($response['status_code']) && $response['status_code'] == 200 && (string)$response['body'])
-			    {
-			        return $this->parseAuthToken($response['body']);
-			    }
-			    return false;
+			    $response = (string)$this->callHttpClient($request);
+			    return $this->parseAuthToken($response);
 			}
 			
 		/**
-		 *  Get the request param for sendHttpRequest() for logging into the specified Google account.
+		 *  Get the request param for callHttpClient() for logging into the specified Google account.
 		 *
 		 *  @param $email  String   User's Google email address.
 		 *  @param $pwd    String   Password for Google account.
-		 *  @return array  Returns array with keys needed by sendHttpRequest()
+		 *  @return array  Returns array with keys needed by callHttpClient()
 		 */
 			public function getLogInRequest($email, $pwd)
 			{
@@ -208,7 +215,8 @@ use HttpClientInterface;
 				);
 				$body = http_build_query($postRequest);
 				$method = 'GET';
-				return compact('url', 'method', 'body');
+				$headers['Accept'] = 'text/plain';
+				return compact('url', 'method', 'headers', 'body');
 			}
 			
 		/**
@@ -225,7 +233,7 @@ use HttpClientInterface;
 				if ('@' === (string)$pwd[0] || version_compare(PHP_VERSION, '5.2.0') < 0) {
 				    $postRequest = http_build_query($postRequest);
 				}				
-
+				
 				$ch = curl_init();
 				curl_setopt($ch, CURLOPT_URL, $url);
 				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -247,19 +255,26 @@ use HttpClientInterface;
 					} else { return false; }
 			}
 
-	 	/**
-		 *  Attempts authenticated GET Request.
+		/**
+		 *  Converts the relative url to the request structure needed by callHttpClient()
 		 *
 		 *  @param $url    String   URL for the GET request.
-		 *  @return Mixed  Curl result as String,
-		 *                 or false (Boolean) when Authentication fails.
+		 *  @param $accept String   mime type expected. Probably error if Content-Type of response is not compatible.
+		 *  @return array  Returns array with keys needed by callHttpClient()
 		 */
-			public function GetData($url)
+			public function GetDataRequest($url, $accept = '*/*')
 			{
-				if(self::IsLoggedIn() === true) {
-				    $request = $this->GetDataRequest($url);
-				    /**********************
-				    $ch = curl_init();
+					$url = self::HOST . $url;
+					$headers = array(
+					    'Authorization' => "GoogleLogin auth={$this->_auth}",
+					    'GData-Version' => '2'
+					);
+					if ($accept) $headers['Accept'] = $accept;
+					$method = 'GET';
+					return compact ('url', 'method', 'headers');
+					
+					/**********************
+					 $ch = curl_init();
 					curl_setopt($ch, CURLOPT_URL, $url);
 					curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 					curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
@@ -271,29 +286,9 @@ use HttpClientInterface;
 					$info = curl_getinfo($ch);
 					curl_close($ch);
 					*************************/
-				    $response = $this->sendHttpRequest($request);
-					return ($response['status_code']!=200) ? false : (string)$response['body'];
-				} else { return false; }
 			}
 
 		/**
-		 *  Converts the relative url to the request structure needed by sendHttpRequest()
-		 *
-		 *  @param $url    String   URL for the GET request.
-		 *  @return array  Returns array with keys needed by sendHttpRequest()
-		 */
-			public function GetDataRequest($url)
-			{
-					$url = self::HOST . $url;
-					$headers = array(
-					    'Authorization' => "GoogleLogin auth={$this->_auth}",
-					    'GData-Version' => '2'
-					);
-					$method = 'GET';
-					return compact ('url', 'method', 'headers');
-			}
-
-	 	/**
 		 *  Gets all available sites from Google Webmaster Tools account.
 		 *
 		 *  @return Mixed  Array with all site URLs registered in GWT account,
@@ -303,21 +298,22 @@ use HttpClientInterface;
 			{
 				if(self::IsLoggedIn() === true) {
 					$request = $this->GetSitesRequest();
-					$response = $this->sendHttpRequest($request);
-					$feed = (string)$response['body'];
-					return $this->parseSites($feed);
-				} else { return false; }
+					$response = (string)$this->callHttpClient($request);
+					return $this->parseSites($response);
+				} else {
+                                  return false;
+                                }
 			}
 
 		/**
-		 *  Get the request param for sendHttpRequest() to get a list of
+		 *  Get the request param for callHttpClient() to get a list of
 		 *  all available sites from Google Webmaster Tools account.
 		 *
-		 *  @return array  Returns array with keys needed by sendHttpRequest()
+		 *  @return array  Returns array with keys needed by callHttpClient()
 		 */
 			public function GetSitesRequest()
 			{
-					return $this->GetDataRequest(self::SERVICEURI."feeds/sites/");
+					return $this->GetDataRequest(self::SERVICEURI."feeds/sites/", 'application/atom+xml');
 			}
 
 		/**
@@ -353,26 +349,25 @@ use HttpClientInterface;
 			{
 				if(self::IsLoggedIn() === true) {
 				    $request = $this->GetDownloadUrlsRequest($url);
-				    $response = $this->sendHttpRequest($request);
-					$downloadList = (string)$response['body'];
+				    $downloadList = (string)$this->callHttpClient($request);
 					return json_decode($downloadList, true);
 				} else { return false; }
 			}
 
 		/**
-		 *  Get the request param for sendHttpRequest() to download links
+		 *  Get the request param for callHttpClient() to download links
 		 *  for an available site
 		 *  from the Google Webmaster Tools account.
 		 *
 		 *  @param $url    String   Site URL registered in GWT.
-		 *  @return array  Returns array with keys needed by sendHttpRequest()
+		 *  @return array  Returns array with keys needed by callHttpClient()
 		 */
 			public function GetDownloadUrlsRequest($url)
 			{
 			        $_url = sprintf(self::SERVICEURI."downloads-list?hl=%s&siteUrl=%s",
 			            $this->_language,
 			            urlencode($url));
-			        return $this->GetDataRequest($_url);
+			        return $this->GetDataRequest($_url,'application/x-javascript');
 			}
 				
 				
@@ -497,9 +492,8 @@ use HttpClientInterface;
 		 */
 			private function SaveData($finalUrl, $finalName)
 			{
-			    $request = $this->GetDataRequest($finalUrl);
-			    $response = $this->sendHttpRequest($request);
-				$data = (string)$response['body'];
+			    $request = $this->GetDataRequest($finalUrl, 'text/csv');
+			    $data = (string)$this->callHttpClient($request);
 				if(strlen($data) > 1 && file_put_contents($finalName, utf8_decode($data))) {
 					array_push($this->_downloaded, realpath($finalName));
 					return true;
@@ -519,7 +513,8 @@ use HttpClientInterface;
 			private function GetToken($uri, $delimiter, $dlUri='')
 			{
 				$matches = array();
-				$tmp = self::GetData($uri);
+				$request = self::GetDataRequest($uri); //What should $accept parameter be?
+				$tmp = (string)$this->callHttpClient($request);
 				preg_match_all("#$dlUri.*?46security_token(.*?)$delimiter#si", $tmp, $matches);
 				return isset($matches[1][0]) ? substr($matches[1][0],3,-1) : '';
 			}
