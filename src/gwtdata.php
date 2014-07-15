@@ -55,6 +55,10 @@
 			);
 			$this->_downloaded = array();
 			$this->_skipped = array();
+			if (extension_loaded('curl'))
+			{
+			    $this->setHttpClient(array(self,'curl_http_client'));
+			}
 		}
 
 		/**
@@ -159,8 +163,8 @@
 		 * If http status code is not 200, or other error 
 		 * e.g. if desired, when Content-Type doesn't match Accept header,
 		 * the callback should throw an Exception which should
-		 * be caught by the caller of GWTdata. GWTdata attempts to
-		 * set the correct Accept headers including
+		 * be caught by the caller of GWTdata.
+		 * GWTdata attempts to set the correct Accept headers including:
 		 * text/csv,
 		 * application/x-javascript for downloads list, 
 		 * application/atom+xml for the sites list,
@@ -214,7 +218,7 @@
 					'source' => "Google-WMTdownloadscript-0.1-php"
 				);
 				$body = http_build_query($postRequest);
-				$method = 'GET';
+				$method = 'POST';
 				$headers['Accept'] = 'text/plain';
 				return compact('url', 'method', 'headers', 'body');
 			}
@@ -227,26 +231,6 @@
 		*                   else false.
 		*/
 			public function parseAuthToken($responseBody) {
-		    /**********************
-				// Before PHP version 5.2.0 and when the first char of $pass is an @ symbol, 
-				// send data in CURLOPT_POSTFIELDS as urlencoded string.
-				if ('@' === (string)$pwd[0] || version_compare(PHP_VERSION, '5.2.0') < 0) {
-				    $postRequest = http_build_query($postRequest);
-				}				
-				
-				$ch = curl_init();
-				curl_setopt($ch, CURLOPT_URL, $url);
-				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-				curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
-				curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-				curl_setopt($ch, CURLOPT_POST, true);
-				curl_setopt($ch, CURLOPT_POSTFIELDS, $postRequest);
-				$output = curl_exec($ch);
-				$info = curl_getinfo($ch);
-				curl_close($ch);
-				if($info['http_code'] == 200) {
-			*********************/
 					preg_match('/Auth=(.*)/', $responseBody, $match);
 					if(isset($match[1])) {
 						$this->_auth = $match[1];
@@ -267,25 +251,61 @@
 					$url = self::HOST . $url;
 					$headers = array(
 					    'Authorization' => "GoogleLogin auth={$this->_auth}",
-					    'GData-Version' => '2'
+					    'GData-Version' => '2',
+					    'Accept-Encoding' => '1',
 					);
 					if ($accept) $headers['Accept'] = $accept;
 					$method = 'GET';
 					return compact ('url', 'method', 'headers');
-					
-					/**********************
-					 $ch = curl_init();
-					curl_setopt($ch, CURLOPT_URL, $url);
-					curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-					curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
-					curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-					curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-					curl_setopt($ch, CURLOPT_ENCODING, true);
-					curl_setopt($ch, CURLOPT_HTTPHEADER, $head);
-					$result = curl_exec($ch);
-					$info = curl_getinfo($ch);
-					curl_close($ch);
-					*************************/
+			}
+
+		/**
+		 * Default for _http_client. Function prototype matches callHttpClient().
+		 *
+		 * @param array $request          Looks like: ['url'=>'https://www.google.com...',
+		 *                                             'method'=>'GET',
+		 *                                             'body'=>string,
+		 *                                             'headers'=>['Authorization' => 'GoogleLogin auth=...',
+		 *                                                         'GData-Version' => '2',
+		 *                                                         'Accept' => 'text/csv',
+		 *                                                         'Header-name'=>string|array]]
+		 * @return string|object|resource If object or resource, it should be castable to a string
+		 */
+			public function curl_http_client($request)
+			{
+				$defaults = array(
+				    'url' => null,
+				    'method' => 'GET',
+				    'headers' => array(),
+				    'body' => null);
+				extract(array_merge($defaults, array_intersect_key($request, $defaults)));
+				if ( ! $url ) throw new Exception("No url given");
+				$ch = curl_init();
+				curl_setopt($ch, CURLOPT_URL, $url);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+				curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+				if ($headers)
+				{
+				    $curl_headers = array();
+				    $implode_header = function($value, $key) use (&$curl_headers)
+				    {
+				        $curl_headers[] = "$key: " . implode(',', (array)$value);
+				    };
+				    array_walk($headers, $implode_header);
+				    curl_setopt($ch, CURLOPT_HTTPHEADER, $curl_headers);
+				}
+				if ($method == 'POST')
+				{
+				    curl_setopt($ch, CURLOPT_POST, true);
+				    curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+				}
+				$result = curl_exec($ch);
+				$info = curl_getinfo($ch);
+				curl_close($ch);
+				if ($info['http_code']!=200) throw new Exception("HTTP status not 200");
+				return $result;
 			}
 
 		/**
