@@ -1,5 +1,5 @@
 <?php
-	/**
+/**
 	 *  PHP class for downloading CSV files from Google Webmaster Tools.
 	 *
 	 *  This class does NOT require the Zend gdata package be installed
@@ -32,6 +32,7 @@
 		public $_language, $_tables, $_daterange, $_downloaded, $_skipped;
 		private $_auth, $_logged_in;
 		private $_http_client;
+		private $_csv_handler;
 
 		public function __construct()
 		{
@@ -57,8 +58,9 @@
 			$this->_skipped = array();
 			if (extension_loaded('curl'))
 			{
-			    $this->setHttpClient(array(self,'curl_http_client'));
+			    $this->setHttpClient(array('GWTdata', 'curl_http_client'));
 			}
+			$this->setCsvHandler(array('GWTdata', 'file_csv_handler'));
 		}
 
 		/**
@@ -182,7 +184,52 @@
 		 */
 			public function callHttpClient(array $request)
 			{
-			    return $this->_http_client($request);
+			    return call_user_func($this->_http_client, $request);
+			}
+			
+		/**
+		 * Inject a callback which the GWTdata object can use to handle the csv data
+		 * 
+		 * The intent is to allow the caller of GWTdata methods
+		 * to control what is done with the downloaded data
+		 * rather than only write to files. E.g. the callback could
+		 * write to a database, or transform and upload to another service.
+		 * See callCsvHandler() for the prototype of the callback.
+		 * 
+		 * @param callable $csv_handler
+		 */
+			public function setCsvHandler(callable $csv_handler)
+			{
+			    $this->_csv_handler = $csv_handler;
+			}
+
+		/**
+		* Calls the closure that was set by setCsvHandler()
+		*
+		* This method has the same param and return type as
+		* the callback that is provided to setCsvHandler().
+		*
+		* @param string|object|resource $http_response
+		*                               The response from the closure
+		*                               that was set by setHttpClient()
+		*
+		* @param String  $targetFileName
+		*                Possibly relative path filename which should
+		*                be unique for each csv table. E.g.
+		*                ./TOP_QUERIES-https_domain.com_path-allowed-20140513-131037.csv
+		*
+		* @return String|Boolean  A transformed name for stored csv table if successful.
+		*                         Should be realpath($targetFileName) if
+		*                         saved as csv file.
+		*                         False means either $http_response had no data,
+		*                         or there was an error trying to handle the
+		*                         response. If this return value is not false,
+		*                         it will be listed in GetDownloadedFiles(). Otherwise
+		*                         $targetFileName will be listed in GetSkippedFiles(). 
+		*/
+			public function callCsvHandler($http_response, $targetFileName)
+			{
+			    return call_user_func($this->_csv_handler, $http_response, $targetFileName);
 			}
 
 		/**
@@ -271,7 +318,7 @@
 		 *                                                         'Header-name'=>string|array]]
 		 * @return string|object|resource If object or resource, it should be castable to a string
 		 */
-			public function curl_http_client($request)
+			public static function curl_http_client($request)
 			{
 				$defaults = array(
 				    'url' => null,
@@ -286,6 +333,7 @@
 				curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
 				curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+				curl_setopt($ch, CURLINFO_HEADER_OUT, true);
 				if ($headers)
 				{
 				    $curl_headers = array();
@@ -321,8 +369,8 @@
 					$response = (string)$this->callHttpClient($request);
 					return $this->parseSites($response);
 				} else {
-                                  return false;
-                                }
+				    return false;
+				}
 			}
 
 		/**
@@ -401,7 +449,7 @@
 			{
 				if(self::IsLoggedIn() === true) {
 					$downloadUrls = self::GetDownloadUrls($site);
-					$filename = parse_url($site, PHP_URL_HOST) ."-". date("Ymd-His");
+					$filename = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $site) ."-". date("Ymd-His");
 					$tables = $this->_tables;
 					foreach($tables as $table) {
 						if($table=="CRAWL_ERRORS") {
@@ -432,10 +480,10 @@
 							  "external-links-domain", "\)", "LATEST_BACKLINKS", "backlinks-latest-dl");
                         }
 						else {
-							$finalName = "$savepath/$table-$filename.csv";
+							$targetFileName = "$savepath/$table-$filename.csv";
 							$finalUrl = $downloadUrls[$table] ."&prop=ALL&db=%s&de=%s&more=true";
 							$finalUrl = sprintf($finalUrl, $this->_daterange[0], $this->_daterange[1]);
-							self::SaveData($finalUrl,$finalName);
+							self::SaveData($finalUrl, $targetFileName);
 						}
 					}
 				} else { return false; }
@@ -453,11 +501,11 @@
 					$uri = self::SERVICEURI . $tokenUri . "?hl=%s&siteUrl=%s";
 					$_uri = sprintf($uri, $this->_language, $site);
 					$token = self::GetToken($_uri, $tokenDelimiter, $dlUri);
-					$filename = parse_url($site, PHP_URL_HOST) ."-". date("Ymd-His");
-					$finalName = "$savepath/$filenamePrefix-$filename.csv";
+					$filename = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $site) ."-". date("Ymd-His");
+					$targetFileName = "$savepath/$filenamePrefix-$filename.csv";
 					$url = self::SERVICEURI . $dlUri . "?hl=%s&siteUrl=%s&security_token=%s&prop=ALL&db=%s&de=%s&more=true";
 					$_url = sprintf($url, $this->_language, $site, $token, $this->_daterange[0], $this->_daterange[1]);
-					self::SaveData($_url,$finalName);
+					self::SaveData($_url, $targetFileName);
 				} else { return false; }
 			}
 
@@ -473,7 +521,7 @@
 			{
 				if(self::IsLoggedIn() === true) {
 					$type_param = "we";
-					$filename = parse_url($site, PHP_URL_HOST) ."-". date("Ymd-His");
+					$filename = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $site) ."-". date("Ymd-His");
 					if($separated) {
 						foreach($this->_errTablesSort as $sortid => $sortname) {
 							foreach($this->_errTablesType as $typeid => $typename) {
@@ -486,20 +534,20 @@
 								}
 								$uri = self::SERVICEURI."crawl-errors?hl=en&siteUrl=$site&tid=$type_param";
 								$token = self::GetToken($uri,"x26");
-								$finalName = "$savepath/CRAWL_ERRORS-$typename-$sortname-$filename.csv";
+								$targetFileName = "$savepath/CRAWL_ERRORS-$typename-$sortname-$filename.csv";
 								$url = self::SERVICEURI."crawl-errors-dl?hl=%s&siteUrl=%s&security_token=%s&type=%s&sort=%s";
 								$_url = sprintf($url, $this->_language, $site, $token, $typeid, $sortid);
-								self::SaveData($_url,$finalName);
+								self::SaveData($_url, $targetFileName);
 							}
 						}
 					}
 					else {
 						$uri = self::SERVICEURI."crawl-errors?hl=en&siteUrl=$site&tid=$type_param";
 						$token = self::GetToken($uri,"x26");
-						$finalName = "$savepath/CRAWL_ERRORS-$filename.csv";
+						$targetFileName = "$savepath/CRAWL_ERRORS-$filename.csv";
 						$url = self::SERVICEURI."crawl-errors-dl?hl=%s&siteUrl=%s&security_token=%s&type=0";
 						$_url = sprintf($url, $this->_language, $site, $token);
-						self::SaveData($_url,$finalName);
+						self::SaveData($_url, $targetFileName);
 					}
 				} else { return false; }
 			}
@@ -508,21 +556,53 @@
 		 *  Saves data to a CSV file based on the given URL.
 		 *
 		 *  @param $finalUrl   String   CSV Download URI.
-		 *  @param $finalName  String   Filepointer to save location.
+		 *  @param $targetFileName  String   Filepointer to save location.
 		 */
-			private function SaveData($finalUrl, $finalName)
+			private function SaveData($finalUrl, $targetFileName)
 			{
 			    $request = $this->GetDataRequest($finalUrl, 'text/csv');
-			    $data = (string)$this->callHttpClient($request);
-				if(strlen($data) > 1 && file_put_contents($finalName, utf8_decode($data))) {
-					array_push($this->_downloaded, realpath($finalName));
+			    $response = $this->callHttpClient($request);
+				$stored_name = $this->callCsvHandler($response, $targetFileName);
+				if ($stored_name)
+				{
+					array_push($this->_downloaded, $stored_name);
 					return true;
 				} else {
-					array_push($this->_skipped, $finalName);
+					array_push($this->_skipped, $targetFileName);
 					return false;
 				}
 			}
 
+		/**
+		 * Default for _csv_handler. Function prototype matches callCsvHandler().
+		 *
+		 * @param string|object|resource $http_response
+		 *                               The response from the closure
+		 *                               that was set by setHttpClient()
+		 *
+		 * @param String  $targetFileName
+		 *                Possibly relative path filename which should
+		 *                be unique for each csv table. E.g.
+		 *                ./TOP_QUERIES-https_domain.com_path-allowed-20140513-131037.csv
+		 *
+		 * @return String|Boolean  realpath($targetFileName) if
+		 *                         saved as csv file.
+		 *                         False means either $http_response had no data,
+		 *                         or there was an error trying to handle the
+		 *                         response. If this return value is not false,
+		 *                         it will be listed in GetDownloadedFiles(). Otherwise
+		 *                         $targetFileName will be listed in GetSkippedFiles(). 
+		 */
+			public static function file_csv_handler($http_response, $targetFileName)
+			{
+			    $data = (string)$http_response;
+			    if(strlen($data) > 1 && file_put_contents($targetFileName, utf8_decode($data)))
+			    {
+			        return realpath($targetFileName);
+			    }
+			    return false;
+			}
+			
 		/**
 		 *  Regular Expression to find the Security Token for a download file.
 		 *
