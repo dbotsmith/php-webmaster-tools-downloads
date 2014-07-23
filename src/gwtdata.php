@@ -213,23 +213,26 @@
 		*                               The response from the closure
 		*                               that was set by setHttpClient()
 		*
-		* @param String  $targetFileName
-		*                Possibly relative path filename which should
-		*                be unique for each csv table. E.g.
-		*                ./TOP_QUERIES-https_domain.com_path-allowed-20140513-131037.csv
+		* @param array   $downloadAttributes
+		*                Keys may be different depending on the table, but include:
+		*                'table' => e.g. TOP_QUERIES
+		*                'site' => e.g. http://example.com/path/
+		*                'downloadTStamp' => unix timestamp e.g. result from time()
+		*                'dateBegin' => Start of date range requested. ISO 8601 (eg. '2012-01-01').
+		*                'dateEnd' => End of date range requested. ISO 8601 (eg. '2012-01-01').
 		*
 		* @return String|Boolean  A transformed name for stored csv table if successful.
-		*                         Should be realpath($targetFileName) if
+		*                         Should be realpath(self::targetFileName($downloadAttributes)) if
 		*                         saved as csv file.
 		*                         False means either $http_response had no data,
 		*                         or there was an error trying to handle the
 		*                         response. If this return value is not false,
-		*                         it will be listed in GetDownloadedFiles(). Otherwise
-		*                         $targetFileName will be listed in GetSkippedFiles(). 
+		*                         it will be listed in GetDownloadedFiles(). Otherwise, the result of
+		*                         self::targetFileName($downloadAttributes) will be listed in GetSkippedFiles(). 
 		*/
-			public function callCsvHandler($http_response, $targetFileName)
+			public function callCsvHandler($http_response, $downloadAttributes)
 			{
-			    return call_user_func($this->_csv_handler, $http_response, $targetFileName);
+			    return call_user_func($this->_csv_handler, $http_response, $downloadAttributes);
 			}
 
 		/**
@@ -449,7 +452,8 @@
 			{
 				if(self::IsLoggedIn() === true) {
 					$downloadUrls = self::GetDownloadUrls($site);
-					$filename = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $site) ."-". date("Ymd-His");
+					$downloadAttributes['site'] = $site;
+					$downloadAttributes['downloadTStamp'] = time();
 					$tables = $this->_tables;
 					foreach($tables as $table) {
 						if($table=="CRAWL_ERRORS") {
@@ -480,10 +484,13 @@
 							  "external-links-domain", "\)", "LATEST_BACKLINKS", "backlinks-latest-dl");
                         }
 						else {
-							$targetFileName = "$savepath/$table-$filename.csv";
 							$finalUrl = $downloadUrls[$table] ."&prop=ALL&db=%s&de=%s&more=true";
 							$finalUrl = sprintf($finalUrl, $this->_daterange[0], $this->_daterange[1]);
-							self::SaveData($finalUrl, $targetFileName);
+							$downloadAttributes['savepath'] = $savepath;
+							$downloadAttributes['table'] = $table;
+							$downloadAttributes['dateBegin'] = $this->_daterange[0];
+							$downloadAttributes['dateEnd'] = $this->_daterange[1];
+							self::SaveData($finalUrl, $downloadAttributes);
 						}
 					}
 				} else { return false; }
@@ -501,11 +508,15 @@
 					$uri = self::SERVICEURI . $tokenUri . "?hl=%s&siteUrl=%s";
 					$_uri = sprintf($uri, $this->_language, $site);
 					$token = self::GetToken($_uri, $tokenDelimiter, $dlUri);
-					$filename = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $site) ."-". date("Ymd-His");
-					$targetFileName = "$savepath/$filenamePrefix-$filename.csv";
+					$downloadAttributes['site'] = $site;
+					$downloadAttributes['downloadTStamp'] = time();
+					$downloadAttributes['savepath'] = $savepath;
+					$downloadAttributes['table'] = $filenamePrefix;
+					$downloadAttributes['dateBegin'] = $this->_daterange[0];
+					$downloadAttributes['dateEnd'] = $this->_daterange[1];
 					$url = self::SERVICEURI . $dlUri . "?hl=%s&siteUrl=%s&security_token=%s&prop=ALL&db=%s&de=%s&more=true";
 					$_url = sprintf($url, $this->_language, $site, $token, $this->_daterange[0], $this->_daterange[1]);
-					self::SaveData($_url, $targetFileName);
+					self::SaveData($_url, $downloadAttributes);
 				} else { return false; }
 			}
 
@@ -521,7 +532,8 @@
 			{
 				if(self::IsLoggedIn() === true) {
 					$type_param = "we";
-					$filename = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $site) ."-". date("Ymd-His");
+					$downloadAttributes['site'] = $site;
+					$downloadAttributes['downloadTStamp'] = time();
 					if($separated) {
 						foreach($this->_errTablesSort as $sortid => $sortname) {
 							foreach($this->_errTablesType as $typeid => $typename) {
@@ -534,20 +546,28 @@
 								}
 								$uri = self::SERVICEURI."crawl-errors?hl=en&siteUrl=$site&tid=$type_param";
 								$token = self::GetToken($uri,"x26");
-								$targetFileName = "$savepath/CRAWL_ERRORS-$typename-$sortname-$filename.csv";
+								$downloadAttributes['savepath'] = $savepath;
+								$downloadAttributes['table'] = 'CRAWL_ERRORS';
+								$downloadAttributes['typename'] = $typename;
+								$downloadAttributes['sortname'] = $sortname;
+								$downloadAttributes['dateBegin'] = $this->_daterange[0];
+								$downloadAttributes['dateEnd'] = $this->_daterange[1];
 								$url = self::SERVICEURI."crawl-errors-dl?hl=%s&siteUrl=%s&security_token=%s&type=%s&sort=%s";
 								$_url = sprintf($url, $this->_language, $site, $token, $typeid, $sortid);
-								self::SaveData($_url, $targetFileName);
+								self::SaveData($_url, $downloadAttributes);
 							}
 						}
 					}
 					else {
 						$uri = self::SERVICEURI."crawl-errors?hl=en&siteUrl=$site&tid=$type_param";
 						$token = self::GetToken($uri,"x26");
-						$targetFileName = "$savepath/CRAWL_ERRORS-$filename.csv";
+						$downloadAttributes['savepath'] = $savepath;
+						$downloadAttributes['table'] = 'CRAWL_ERRORS';
+						$downloadAttributes['dateBegin'] = $this->_daterange[0];
+						$downloadAttributes['dateEnd'] = $this->_daterange[1];
 						$url = self::SERVICEURI."crawl-errors-dl?hl=%s&siteUrl=%s&security_token=%s&type=0";
 						$_url = sprintf($url, $this->_language, $site, $token);
-						self::SaveData($_url, $targetFileName);
+						self::SaveData($_url, $downloadAttributes);
 					}
 				} else { return false; }
 			}
@@ -556,22 +576,56 @@
 		 *  Saves data to a CSV file based on the given URL.
 		 *
 		 *  @param $finalUrl   String   CSV Download URI.
-		 *  @param $targetFileName  String   Filepointer to save location.
+		 *  @param $downloadAttributes  array Attributes used by targetFileName()
+		 *                                    and others can be used by the csvHandler.
 		 */
-			private function SaveData($finalUrl, $targetFileName)
+			private function SaveData($finalUrl, $downloadAttributes)
 			{
 			    $request = $this->GetDataRequest($finalUrl, 'text/csv');
 			    $response = $this->callHttpClient($request);
-				$stored_name = $this->callCsvHandler($response, $targetFileName);
+				$stored_name = $this->callCsvHandler($response, $downloadAttributes);
 				if ($stored_name)
 				{
 					array_push($this->_downloaded, $stored_name);
 					return true;
 				} else {
-					array_push($this->_skipped, $targetFileName);
+			    $targetFileName = self::targetFileName($downloadAttributes);
+			    array_push($this->_skipped, $targetFileName);
 					return false;
 				}
 			}
+
+		/**
+		* Build relative filename from downloadAttributes
+		* 
+		* @param array   $downloadAttributes
+		*                Keys may be different depending on the table, but include:
+		*                'table' => e.g. TOP_QUERIES
+		*                'site' => e.g. http://example.com/path/
+		*                'downloadTStamp' => unix timestamp e.g. result from time()
+		*                'dateBegin' => Start of date range requested. ISO 8601 (eg. '2012-01-01').
+		*                'dateEnd' => End of date range requested. ISO 8601 (eg. '2012-01-01').
+		* 
+		*/
+		public static function targetFileName($downloadAttributes)
+		{
+		    $downloadAttrDefaults = array(
+		        'table' => null,
+		        'site' => null,
+		        'downloadTStamp' => null,
+		        'dateBegin' => null,
+		        'dateEnd' = null,
+		        'savepath' => '.',
+		        'typename' => null,
+		        'sortname' => null,
+		    );
+		    extract(array_merge($downloadAttrDefaults, array_intersect_key($downloadAttributes, $downloadAttrDefaults)));
+		     
+		    $siteStr = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $site);
+		    $tstamp = date("Ymd-His", $downloadTStamp);
+		    $filename = implode('-', array_filter(compact('table', 'typename', 'sortname', 'siteStr', 'tstamp')));
+		    return "$savepath/$filename.csv";
+		}
 
 		/**
 		 * Default for _csv_handler. Function prototype matches callCsvHandler().
@@ -580,21 +634,26 @@
 		 *                               The response from the closure
 		 *                               that was set by setHttpClient()
 		 *
-		 * @param String  $targetFileName
-		 *                Possibly relative path filename which should
-		 *                be unique for each csv table. E.g.
-		 *                ./TOP_QUERIES-https_domain.com_path-allowed-20140513-131037.csv
+		* @param array   $downloadAttributes
+		*                Keys may be different depending on the table, but include:
+		*                'table' => e.g. TOP_QUERIES
+		*                'site' => e.g. http://example.com/path/
+		*                'downloadTStamp' => unix timestamp e.g. result from time()
+		*                'dateBegin' => Start of date range requested. ISO 8601 (eg. '2012-01-01').
+		*                'dateEnd' => End of date range requested. ISO 8601 (eg. '2012-01-01').
 		 *
-		 * @return String|Boolean  realpath($targetFileName) if
+		 * @return String|Boolean  A transformed name for stored csv table if successful.
+		 *                         Should be realpath(self::targetFileName($downloadAttributes)) if
 		 *                         saved as csv file.
 		 *                         False means either $http_response had no data,
 		 *                         or there was an error trying to handle the
 		 *                         response. If this return value is not false,
-		 *                         it will be listed in GetDownloadedFiles(). Otherwise
-		 *                         $targetFileName will be listed in GetSkippedFiles(). 
+		 *                         it will be listed in GetDownloadedFiles(). Otherwise, the result of
+		 *                         self::targetFileName($downloadAttributes) will be listed in GetSkippedFiles(). 
 		 */
-			public static function file_csv_handler($http_response, $targetFileName)
+			public static function file_csv_handler($http_response, $downloadAttributes)
 			{
+			    $targetFileName = self::targetFileName($downloadAttributes);
 			    $data = (string)$http_response;
 			    if(strlen($data) > 1 && file_put_contents($targetFileName, utf8_decode($data)))
 			    {
