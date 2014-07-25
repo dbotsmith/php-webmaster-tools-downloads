@@ -614,7 +614,7 @@
 		        'site' => null,
 		        'downloadTStamp' => null,
 		        'dateBegin' => null,
-		        'dateEnd' = null,
+		        'dateEnd' => null,
 		        'savepath' => '.',
 		        'typename' => null,
 		        'sortname' => null,
