@@ -180,11 +180,14 @@
 		 *                                                         'GData-Version' => '2',
 		 *                                                         'Accept' => 'text/csv',
 		 *                                                         'Header-name'=>string|array]]
-		 * @return string|object|resource If object or resource, it should be castable to a string
+		 * @param boolean $must_return_string GWTdata sets this true when it will be
+		 *                                    parsing the response rather than passing it to the csv handler.
+		 * @return string|object|resource   Must be string if $must_return_string is true.
+		 *                                  Otherwise, whatever is needed by the csv handler.
 		 */
-			public function callHttpClient(array $request)
+			public function callHttpClient(array $request, $must_return_string)
 			{
-			    return call_user_func($this->_http_client, $request);
+			    return call_user_func($this->_http_client, $request, $must_return_string);
 			}
 			
 		/**
@@ -246,7 +249,7 @@
 			public function LogIn($email, $pwd)
 			{
 			    $request = $this->getLogInRequest($email, $pwd);
-			    $response = (string)$this->callHttpClient($request);
+			    $response = $this->callHttpClient($request, true);
 			    return $this->parseAuthToken($response);
 			}
 			
@@ -319,9 +322,12 @@
 		 *                                                         'GData-Version' => '2',
 		 *                                                         'Accept' => 'text/csv',
 		 *                                                         'Header-name'=>string|array]]
-		 * @return string|object|resource If object or resource, it should be castable to a string
+		 * @param boolean $must_return_string GWTdata sets this true when it will be
+		 *                                    parsing the response rather than passing it to the csv handler.
+		 * @return string|object|resource   Must be string if $must_return_string is true.
+		 *                                  Otherwise, whatever is needed by the csv handler.
 		 */
-			public static function curl_http_client($request)
+			public static function curl_http_client($request, $must_return_string)
 			{
 				$defaults = array(
 				    'url' => null,
@@ -369,7 +375,7 @@
 			{
 				if(self::IsLoggedIn() === true) {
 					$request = $this->GetSitesRequest();
-					$response = (string)$this->callHttpClient($request);
+					$response = $this->callHttpClient($request, true);
 					return $this->parseSites($response);
 				} else {
 				    return false;
@@ -420,7 +426,7 @@
 			{
 				if(self::IsLoggedIn() === true) {
 				    $request = $this->GetDownloadUrlsRequest($url);
-				    $downloadList = (string)$this->callHttpClient($request);
+				    $downloadList = $this->callHttpClient($request, true);
 					return json_decode($downloadList, true);
 				} else { return false; }
 			}
@@ -582,7 +588,7 @@
 			private function SaveData($finalUrl, $downloadAttributes)
 			{
 			    $request = $this->GetDataRequest($finalUrl, 'text/csv');
-			    $response = $this->callHttpClient($request);
+			    $response = $this->callHttpClient($request, false);
 				$stored_name = $this->callCsvHandler($response, $downloadAttributes);
 				if ($stored_name)
 				{
@@ -673,7 +679,7 @@
 			{
 				$matches = array();
 				$request = self::GetDataRequest($uri); //What should $accept parameter be?
-				$tmp = (string)$this->callHttpClient($request);
+				$tmp = $this->callHttpClient($request, true);
 				preg_match_all("#$dlUri.*?46security_token(.*?)$delimiter#si", $tmp, $matches);
 				return isset($matches[1][0]) ? substr($matches[1][0],3,-1) : '';
 			}
