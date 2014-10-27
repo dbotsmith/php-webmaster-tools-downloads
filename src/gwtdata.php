@@ -360,8 +360,12 @@
 				}
 				$result = curl_exec($ch);
 				$info = curl_getinfo($ch);
+				if (! $result) {
+				    $err = curl_error($ch);
+				    throw new \Exception("Curl error: {$err} URL: {$url}");
+				}
 				curl_close($ch);
-				if ($info['http_code']!=200) throw new Exception("HTTP status not 200");
+				if ($info['http_code']!=200) throw new Exception("HTTP status not 200. " . print_r($info, true));
 				return $result;
 			}
 
