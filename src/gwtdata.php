@@ -365,7 +365,9 @@
 				    throw new \Exception("Curl error: {$err} URL: {$url}");
 				}
 				curl_close($ch);
-				if ($info['http_code']!=200) throw new Exception("HTTP status not 200. " . print_r($info, true));
+				if ($info['http_code']!=200) {
+				    throw new Exception("HTTP status not 200. " . print_r(compact('result', 'info'), true));
+				}
 				return $result;
 			}
 
