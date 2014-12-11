@@ -495,7 +495,7 @@
                             self::DownloadCSV_XTRA($site, $savepath,
 							  "external-links-domain", "\)", "LATEST_BACKLINKS", "backlinks-latest-dl");
                         }
-						else {
+						elseif (isset($downloadUrls[$table])) {
 							$finalUrl = $downloadUrls[$table] ."&prop=ALL&db=%s&de=%s&more=true";
 							$finalUrl = sprintf($finalUrl, $this->_daterange[0], $this->_daterange[1]);
 							$downloadAttributes['savepath'] = $savepath;
@@ -503,6 +503,9 @@
 							$downloadAttributes['dateBegin'] = $this->_daterange[0];
 							$downloadAttributes['dateEnd'] = $this->_daterange[1];
 							self::SaveData($finalUrl, $downloadAttributes);
+						}
+						else {
+						    throw new Exception("Unhandled table type or failed downloads-list for: {$table}");
 						}
 					}
 				} else { return false; }
