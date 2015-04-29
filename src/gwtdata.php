@@ -413,6 +413,10 @@
 			            $doc = new DOMDocument();
 			            $doc->loadXML($feed);
 			            foreach ($doc->getElementsByTagName('entry') as $node) {
+			                $verified = $node->getElementsByTagNameNS('http://schemas.google.com/webmasters/tools/2007', 'verified');
+			                if ($verified->length < 1 || $verified->item(0)->nodeValue == 'false') {
+			                    continue;
+			                }
 			                array_push($sites,
 			                $node->getElementsByTagName('title')->item(0)->nodeValue);
 			            }
