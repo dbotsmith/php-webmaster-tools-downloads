@@ -268,7 +268,7 @@
 					'Email' => $email,
 					'Passwd' => $pwd,
 					'service' => "sitemaps",
-					'source' => "Google-WMTdownloadscript-0.1-php"
+					'source' => "Google-WMTdownloadscript-0.1"
 				);
 				$body = http_build_query($postRequest);
 				$method = 'POST';
